@@ -1,3 +1,5 @@
+ЕСЛИ САЙТ РАБОТАЕТ, ТО ВСЁ БЫЛО с НЕГО: http://wiki.pantsuh.ru/ru/Demo-2024/задание1-1
+
 1. Выполните базовую настройку всех устройств:
 ![image](https://github.com/DimaDanil/demo/assets/170974285/64945a6a-25db-43b7-84d5-d18e74800d58)
 
@@ -33,7 +35,13 @@ systemctl restart networking (NetworkManager)
 ![image](https://github.com/DimaDanil/demo/assets/170974285/df5def94-c74b-4e84-87f2-8ac7fc3ac4d2)
 
 ___________________________________________________________________________________________
+
+nano /etc/apt/sorces.list
+![image](https://github.com/borpov/demo/assets/170978905/994fc240-4597-4708-b109-fdaecfa1e0d1)
+
+___________________________________________________________________________________________
 Маршрутизация транзитных IP-пакетов
+
 nano /etc/sysctl.conf
 В данном файле прописываем следующие строки:
 
@@ -93,3 +101,194 @@ ________________________________________________________________________________
       dnf install -y frr
 
     nano /etc/frr/daemons
+В самом файле меняем:
+
+ospfd = yes - для OSPFv2 (IPv4)
+
+ospf6d = yes - для OSPFv3 (IPv6)
+
+Включаем и добавляем в автозагрузку службу FRR:
+
+    systemctl enable --now frr
+
+    vtysh
+![image](https://github.com/borpov/demo/assets/170978905/a493f191-2803-425e-9f06-030a8c015462)
+
+Схема L3:
+
+![image](https://github.com/borpov/demo/assets/170978905/89c30468-7583-4084-85e1-824b74a9e16b)
+
+_____________________________________________________________________________________________
+
+  3. Установка DHCP. Настройка DHCP на HQ-R для IPv4
+
+    dnf install  dhcp-server
+    
+    nano /etc/dhcp/dhcpd.conf
+
+
+    subnet 172.16.100.0 netmask 255.255.255.192 {
+
+    range 172.16.100.2 172.16.100.62;
+  
+    option routers 172.16.100.1;
+
+    default-lease-time 600;
+
+  
+    max-lease-time 7200;
+    }
+
+    Резервирование ip-адреса за клиентом
+    
+Резервирование ip-адреса за клиентом: Хосту с именем HQ-SRV , у которого сетевая карта имеет MAC ff:ff:ff:ff:ff:ff зарезервируем адрес 172.16.100.2.
+
+    host HQ-SRV {
+
+        hardware ethernet ff:ff:ff:ff:ff:ff;
+        
+        fixed-address 172.16.100.2;
+    }
+
+Открываем файл конфигурации
+
+    nano /etc/sysconfig/dhcpd
+
+Добавляем в него следующее:
+
+    DHCPDARGS=ens19
+    
+Запускаем и добавляем в автозагрузку службу dhcpd (для IPv4):
+
+    systemctl enable --now dhcpd
+
+Настройка DHCP на HQ-R для IPv6
+
+![image](https://github.com/borpov/demo/assets/170978905/78ec05d6-4e95-4e6b-af6d-c3521527e338)
+
+    cp /usr/share/doc/dhcp-server/dhcpd6.conf.example /etc/dhcp/dhcpd6.conf
+
+    nano /etc/dhcp/dhcpd6.conf
+    
+    ![image](https://github.com/borpov/demo/assets/170978905/5a7dba20-4ce5-4c09-9b3b-57968e349702)
+
+    systemctl enable --now dhcpd6  Перезагружаем сетевой интерфейс на HQ-SRV
+    
+Далее пропписываем:
+
+    journalctl -f -u dhcpd6.service
+
+    ![image](https://github.com/borpov/demo/assets/170978905/5283e6cf-d377-4056-a567-1a73618341bd)
+
+    systemctl restart dhcpd6
+
+  Установка и настройка RA
+
+    dnf install -y radvd
+
+    nano /etc/sysctl.conf
+
+  Добавляем: net.ipv6.conf.enp0s8.accept_ra=2
+
+  ![image](https://github.com/borpov/demo/assets/170978905/f496a33d-fd2d-43d2-924a-a815f7d6ec53)
+
+    systemctl restart dhcpd6
+
+    systemctl enable --now radvd
+
+_______________________________________________________________________________________________
+    
+4. Настроить локальные учётные записи
+
+       useradd -c "Admin" admin -U / useradd -c "Network admin" network_admin -U
+   
+       passwd admin / passwd network_admin
+
+admin - имя пользователя
+
+-c Admin любая текстовая строка.
+-U - cоздание группы с тем же именем
+
+_______________________________________________________________________________________________
+
+5.Измерить пропускную способность сети
+
+    dnf install iperf3 -y
+
+машина ISP: iperf3 -s и машина HQ-R: iperf3 -c IP_address_ISP
+
+_______________________________________________________________________________________________
+
+6. Составить backup скриптов
+
+
+Создадим директорию для хранения скрипта резервного копирования backup-script и директорию для хранения архивов резервных копий backup на машине HQ-R 
+
+       mkdir /var/{backup,backup-script}
+
+       nano /var/backup-script/backup.sh
+
+![image](https://github.com/borpov/demo/assets/170978905/bb10ae7d-3d6c-4afd-9903-1ef300a74010)
+
+    chmod +x /var/backup-script/backup.sh
+
+    /var/backup-script/backup.sh (запуск скрипта)
+
+    mkdir /var/{backup,backup-script} (перенос на BR-R)
+
+  BR-R
+
+    scp admin@10.10.10.1:/var/backup-script/backup.sh /var/backup-script/
+
+Если потребует права, то: chmod +x /var/backup-script/backup.sh
+
+    /var/backup-script/backup.sh (запуск скрипта)
+_______________________________________________________________________________________________
+
+7. Настройте подключение по SSH
+
+       nano /etc/ssh/sshd_config
+   И меняем на Port 2222
+
+       systemctl restart sshd
+
+Перенаправление
+
+    nano etc/nftable/hq-r.nft
+
+    ![image](https://github.com/borpov/demo/assets/170978905/8fc908d2-1857-45d2-822d-0b87df41b707)
+
+    systemctl restart nftables
+
+   _______________________________________________________________________________________________
+  
+  8.Настройте контроль доступа до HQ-SRV по SSH
+  
+     dnf install -y nftables
+
+     nano /etc/nftables/hq-srv.nft
+
+    table inet filter {
+    
+            chain input {
+            
+            type filter hook input priority filter; policy accept;
+            
+            ip saddr 3.3.3.2 tcp dport 2222 counter reject
+            
+            ip saddr 4.4.4.0/30 tcp dport 2222 counter reject
+            
+            ip6 saddr 2024:3::/64 tcp dport 2222 counter reject
+            
+            ip6 saddr 2024:4::/64 tcp dport 2222 counter reject
+            
+            }
+            
+     }
+Включаем
+
+    nano /etc/sysconfig/nftables.conf
+    include "/etc/nftables/hq-srv.nft"
+    systemctl enable --now nftables
+
+    ![image](https://github.com/borpov/demo/assets/170978905/61a558d2-ff07-48f1-a7f6-6a3a488e3fb9)
